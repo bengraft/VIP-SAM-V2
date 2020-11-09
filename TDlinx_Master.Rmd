@@ -1,0 +1,100 @@
+---
+title: "Adding TDlinx Master Data to VIPSAM2"
+author: "Ben Graft"
+date: "11/9/2020"
+output: html_document
+---
+
+### Load Libraries
+```{r}
+library(tidyverse)
+library(purrr)
+library(odbc)
+library(RODBC)
+library(dplyr)
+library(ggplot2)
+library(gtable)
+library(stringi)
+library(DBI)
+library(naniar)
+library(stringr)
+library(lubridate)
+library(maps)
+library(readr)
+
+con <- dbConnect(odbc::odbc(), dsn = "CLPImpala")
+
+```
+
+```{sql connection=con, output.var="TDlinx_master"}
+
+SELECT DISTINCT stdlinxscd as 'tdlinx_number', store_status, store_name, store_num, store_street_address, store_city, store_state, store_zip, store_latitude, store_longitude, premise_type FROM dp_data_science.vwb_stb_tdlinx
+
+```
+
+# geocode the stores with missing lat, long coordinates to the city's lat, long coordinates
+```{r}
+
+zipcode_coords <-
+  read_delim(
+    "/data1/home/bi6ekbg/vipsam2/us-zip-code-latitude-and-longitude.csv",
+    ";",
+    escape_double = FALSE,
+    trim_ws = TRUE
+  )
+
+zipcode_coords <- zipcode_coords %>% 
+  select(Zip, Latitude, Longitude)
+
+TDlinx_master$zip <- stringr::str_sub(string = TDlinx_master$store_zip, start = 1, end = 5)
+
+
+TDlinx_master <- left_join(x = TDlinx_master, y = zipcode_coords, by = c("zip"="Zip"))
+
+TDlinx_master <- TDlinx_master %>%
+  mutate(
+    store_latitude = case_when(is.na(store_latitude) ~ Latitude, TRUE ~ store_latitude),
+    store_longitude = case_when(is.na(store_longitude) ~ Longitude, TRUE ~ store_longitude)
+  )
+  
+
+```
+
+### Fill in remaining missing lat-long coords with city coords
+```{r}
+
+us.cities <- maps::us.cities
+
+state_abv <- unique(us.cities$country.etc)
+state_abv <- paste(state_abv, collapse = "|")
+
+us.cities$name <- stringr::str_trim(gsub(pattern = state_abv, replacement = "", x = us.cities$name, perl = TRUE))
+
+us.cities <- us.cities %>% 
+  select(-c(pop, capital))
+
+TDlinx_master <- left_join(x = TDlinx_master, y = us.cities, by = c("store_city"="name", "store_state"="country.etc"))
+
+TDlinx_master <- TDlinx_master %>%
+  mutate(
+    store_latitude = case_when(is.na(store_latitude) ~ lat, TRUE ~ store_latitude),
+    store_longitude = case_when(is.na(store_longitude) ~ long, TRUE ~ store_longitude)
+  )
+```
+
+
+# looking into accounts that still aren't geocoded
+- only 17 open accounts left that aren't geocoded. May just do these by address with geocoding package.
+```{r}
+TDLinx_no_geocode <- TDlinx_master %>%
+  filter(is.na(store_latitude),
+         is.na(store_longitude))
+
+TDLinx_Open <- TDlinx_master %>% filter(store_status == "Open Store")
+
+TDLinx_Open_no_geocode <- TDLinx_Open %>% 
+    filter(is.na(store_latitude),
+         is.na(store_longitude))
+```
+
+
