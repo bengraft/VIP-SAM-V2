@@ -37,6 +37,17 @@ WHERE store_status = "Open Store"
 
 ```
 
+Trim the field `store_zip` to just the first 5 digits
+```{r}
+
+TDlinx_master <- TDlinx_master %>% 
+  mutate(store_zip = trimws(
+    stringr::str_sub(
+      string = store_zip, start = 1, end = 5)
+    ))
+
+```
+
 <!-- ### check if TDLinx Master has any duplicates -->
 ```{r, eval=FALSE, echo = FALSE}
 df_tdlinx_master_check <- TDlinx_master %>% 
