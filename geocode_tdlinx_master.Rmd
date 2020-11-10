@@ -1,5 +1,5 @@
 ---
-title: "Geocode TDLinx Master Data"
+title: "Geocode Stores"
 author: "Ben Graft"
 date: "11/10/2020"
 output: html_document
@@ -24,77 +24,58 @@ library(readr)
 
 con <- dbConnect(odbc::odbc(), dsn = "CLPImpala")
 
-```
-
-```{sql connection=con, output.var="TDlinx_master"}
-
-SELECT DISTINCT stdlinxscd as 'tdlinx_number', store_status, store_name, store_num, store_street_address, store_city, store_state, store_zip, store_latitude, store_longitude, premise_type FROM dp_data_science.vwb_stb_tdlinx
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, tidy = TRUE)
 
 ```
 
-# geocode the stores with missing lat, long coordinates to the city's lat, long coordinates
 ```{r}
 
-zipcode_coords <-
-  read_delim(
-    "/data1/home/bi6ekbg/vipsam2/us-zip-code-latitude-and-longitude.csv",
-    ";",
-    escape_double = FALSE,
-    trim_ws = TRUE
-  )
-
-zipcode_coords <- zipcode_coords %>% 
-  select(Zip, Latitude, Longitude)
-
-TDlinx_master$zip <- stringr::str_sub(string = TDlinx_master$store_zip, start = 1, end = 5)
-
-
-TDlinx_master <- left_join(x = TDlinx_master, y = zipcode_coords, by = c("zip"="Zip"))
-
-TDlinx_master <- TDlinx_master %>%
-  mutate(
-    store_latitude = case_when(is.na(store_latitude) ~ Latitude, TRUE ~ store_latitude),
-    store_longitude = case_when(is.na(store_longitude) ~ Longitude, TRUE ~ store_longitude)
-  )
-  
+df_geocode <- read_csv(file = "//data1/home/bi6ekbg/vipsam2/tdlinx_geocode.csv")
 
 ```
 
-### Fill in remaining missing lat-long coords with city coords
-```{r}
+```{python}
+import subprocess
+import csv
+import sys
+def install(package):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+def copy_subscripts(script):
+    subprocess.check_call([sys.executable,"-m", script])
 
-us.cities <- maps::us.cities
-
-state_abv <- unique(us.cities$country.etc)
-state_abv <- paste(state_abv, collapse = "|")
-
-us.cities$name <- stringr::str_trim(gsub(pattern = state_abv, replacement = "", x = us.cities$name, perl = TRUE))
-
-us.cities <- us.cities %>% 
-  select(-c(pop, capital))
-
-TDlinx_master <- left_join(x = TDlinx_master, y = us.cities, by = c("store_city"="name", "store_state"="country.etc"))
-
-TDlinx_master <- TDlinx_master %>%
-  mutate(
-    store_latitude = case_when(is.na(store_latitude) ~ lat, TRUE ~ store_latitude),
-    store_longitude = case_when(is.na(store_longitude) ~ long, TRUE ~ store_longitude)
-  )
+install('geopy')
 ```
 
+```{python}
 
-# looking into accounts that still aren't geocoded
-- only 17 open accounts left that aren't geocoded. May just do these by address with geocoding package.
-```{r}
-TDLinx_no_geocode <- TDlinx_master %>%
-  filter(is.na(store_latitude),
-         is.na(store_longitude))
+import csv
+from time import sleep
+import pandas as pd
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut
 
-TDLinx_Open <- TDlinx_master %>% filter(store_status == "Open Store")
+# Read in Dataframe containing TDLinx Number and Address for all Stores
+df = r.df_geocode
 
-TDLinx_Open_no_geocode <- TDLinx_Open %>% 
-    filter(is.na(store_latitude),
-         is.na(store_longitude))
+# Geocode addresses
+geolocator = Nominatim(user_agent="Chrome/86.0.4240.183")
+
+with open('//data1/home/bi6ekbg/vipsam2/geocoded_address.csv','w') as f1:
+    writer=csv.writer(f1, delimiter=',',lineterminator='\n',)
+    writer.writerow(['tdlinx_number', 'address', 'latitude', 'longitude'])
+    for row in df['store_address']:
+        try:
+            lat = geolocator.geocode(row, timeout = 60).latitude
+        except:
+            lat = 0
+        sleep(1)
+        try:
+            lon = geolocator.geocode(row, timeout = 60).longitude
+        except:
+            lon = 0
+        sleep(1)
+        writer.writerow([row, lat, lon])
+        print(row, lat, lon)
+
+
 ```
-
-
