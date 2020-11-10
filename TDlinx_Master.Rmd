@@ -148,5 +148,12 @@ write_csv(x = df, path = "vipsam_brand_stores.csv")
 
 ```
 
+### Create Field `store_address` that will be the complete address, this will be the input for the geocoding script. Write CSV file.
+```{r, eval=FALSE}
 
+df <- df %>% 
+  mutate(store_address = paste0(store_street_address, ", ", store_city, ", ", store_state, " ", store_zip))
+
+write_csv(x = df, path = "vipsam_brand_stores_geocode.csv")
+```
 
