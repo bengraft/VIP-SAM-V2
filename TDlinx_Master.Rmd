@@ -31,7 +31,7 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, tidy = TRUE
 ### Pull All Open Stores from TDLinx Master Data Source
 ```{sql connection=con, output.var="TDlinx_master"}
 
-SELECT DISTINCT stdlinxscd as 'tdlinx_number', store_status, store_name, store_street_address, store_city, store_state, store_zip, store_latitude, store_longitude, premise_type FROM dp_data_science.vwb_stb_tdlinx
+SELECT DISTINCT stdlinxscd as 'tdlinx_number', store_status, store_name, store_street_address, store_city, store_state, store_zip, store_latitude, store_longitude, premise_type, sells_distilled_spirits, sells_wine, sells_beer FROM dp_data_science.vwb_stb_tdlinx
 WHERE store_status = "Open Store"
 
 
@@ -61,11 +61,11 @@ df_tdlinx_master_check <- TDlinx_master %>%
 ### Pull All SKUs level information for all brands and associated 12-month Rolling Volume
 ```{sql connection=con, output.var="vipsam2"}
 
-SELECT tdlinx_number, brand_name, SUM(v12_month_cases_9l) as 'v12_month_cases_9l'
+SELECT tdlinx_number, brand_name, SUM(v12_month_cases_9l) as 'v12_month_cases_9l', sells_distilled_spirits, sells_wine, sells_beer
 FROM aa_data_science_staging.aa_eh_tbl_vipsamii 
 WHERE t_date = (SELECT MAX(t_date) FROM aa_data_science_staging.aa_eh_tbl_vipsamii) and 
 store_status = "Open Store"
-GROUP BY tdlinx_number, brand_name
+GROUP BY tdlinx_number, brand_name, sells_distilled_spirits, sells_wine, sells_beer
 
 ```
 
@@ -79,81 +79,175 @@ GROUP BY tdlinx_number, brand_name, t_date, sub_brand_name, bottle_size, sku
 
 ```
 
+# vipsam2 - split brands into 3 product types: Spirits, RTDs, and Wines.
+
+  
+# replicate the process below for each of the 3 dataframes (both from vipsam2 & TDlinx_master), so that each only considers the appropriate universe of stores.
+```{r}
+
+vipsam2 <- vipsam2 %>% 
+  mutate(product_type = case_when(#Spirits
+                                  brand_name == "OF 100P" ~ "Spirit",
+                                  brand_name == "JD Tennessee Fire" ~ "Spirit", 
+                                  brand_name == "JD Tennessee Honey" ~ "Spirit", 
+                                  brand_name == "JD Tennessee Apple" ~ "Spirit", 
+                                  brand_name == "JD Tennessee Rye" ~ "Spirit", 
+                                  brand_name == "Jack Daniels Tenness" ~ "Spirit", 
+                                  brand_name == "OF 86P" ~ "Spirit", 
+                                  brand_name == "Coopers Bourbon" ~ "Spirit", 
+                                  brand_name == "OF Rye" ~ "Spirit", 
+                                  brand_name == "WR Double Oaked" ~ "Spirit", 
+                                  brand_name == "JD Single Barrel" ~ "Spirit", 
+                                  brand_name == "JDSB Barrel Proof" ~ "Spirit", 
+                                  brand_name == "OF Craft & SBBL" ~ "Spirit", 
+                                  brand_name == "Woodford Reserve" ~ "Spirit", 
+                                  brand_name == "Gentleman Jack" ~ "Spirit", 
+                                  brand_name == "Slane Irish Whiskey" ~ "Spirit", 
+                                  brand_name == "WR Rye" ~ "Spirit", 
+                                  brand_name == "Chambord" ~ "Spirit", 
+                                  brand_name == "Herradura" ~ "Spirit", 
+                                  brand_name == "BenRiach" ~ "Spirit", 
+                                  brand_name == "Fords Gin" ~ "Spirit", 
+                                  brand_name == "Korbel Brandy" ~ "Spirit", 
+                                  brand_name == "JD Winter Jack" ~ "Spirit", 
+                                  brand_name == "WR Straight Malt" ~ "Spirit", 
+                                  brand_name == "Pepe Lopez" ~ "Spirit", 
+                                  brand_name == "El Jimador" ~ "Spirit", 
+                                  brand_name == "JD Gold" ~ "Spirit", 
+                                  brand_name == "JD Sinatra" ~ "Spirit", 
+                                  brand_name == "OF Mint Julep" ~ "Spirit", 
+                                  brand_name == "Finlandia Vodka" ~ "Spirit", 
+                                  brand_name == "JD Craft Rye" ~ "Spirit", 
+                                  brand_name == "King of Kentucky" ~ "Spirit", 
+                                  brand_name == "Don Eduardo" ~ "Spirit", 
+                                  brand_name == "Herradura Ultra" ~ "Spirit", 
+                                  brand_name == "GlenDronach" ~ "Spirit", 
+                                  brand_name == "WR Luxury" ~ "Spirit", 
+                                  brand_name == "HR Seleccion Suprema" ~ "Spirit", 
+                                  brand_name == "WR Straight Wheat" ~ "Spirit", 
+                                  brand_name == "GlenGlassaugh" ~ "Spirit", 
+                                  brand_name == "Tequila Non-Alcohol" ~ "Spirit", 
+                                  brand_name == "EJ Flavors" ~ "Spirit", 
+                                  brand_name == "LBD Vodka" ~ "Spirit", 
+                                  brand_name == "HR Legend" ~ "Spirit", 
+                                  brand_name == "HR Coleccion De La C" ~ "Spirit", 
+                                  brand_name == "Chambord Flavored Vo" ~ "Spirit", 
+                                  brand_name == "Antiguo" ~ "Spirit", 
+                                  brand_name == "Herradura Specialtie" ~ "Spirit", 
+                                  # RTDs
+                                  brand_name == "JD & Cola" ~ "RTD", 
+                                  brand_name == "JD RTDs Other" ~ "RTD", 
+                                  brand_name == "JD TN Honey RTD" ~ "RTD", 
+                                  brand_name == "JD Country Cocktails" ~ "RTD", 
+                                  brand_name == "New Mix" ~ "RTD", 
+                                  # Wines
+                                  brand_name == "Sonoma-Cutrer" ~ "Wine", 
+                                  brand_name == "Korbel Champagne" ~ "Wine",
+                                  brand_name == "Korbel Prosecco" ~ "Wine"
+                                  ))
+
+# split vipsam2 into 3 dfs by product_type 
+vipsam2_spirits <- vipsam2 %>% filter(product_type == "Spirit")
+vipsam2_rtd <- vipsam2 %>% filter(product_type == "RTD")
+vipsam2_wine <- vipsam2 %>% filter(product_type == "Wine")
+
+```
+
+# TDlinx_master - split into 3 dfs. 
+  sells_distilled_spirits == "Yes"
+  sells_beer == "Yes"
+  sells_wine == "Yes"
+```{r}
+# split TDlinx_master into 3 dfs by product_type 
+TDlinx_master_spirits <- TDlinx_master %>% filter(sells_distilled_spirits == "Yes")
+TDlinx_master_rtd <- TDlinx_master %>% filter(sells_beer == "Yes")
+TDlinx_master_wine <- TDlinx_master %>% filter(sells_wine == "Yes")
+  
+```
+
 
 ### Create Dataframe that has a tdlinx_number associated with every brand
 <!-- , sub_brand, bottle_size, sku combination. -->
 * (For the POC only use Brand. The final product will include brand, sub_brand, bottle_size, and sku)
 ```{r}
-
-# create dataframe of all brand, sub_brand, bottle_size, sku
-# df_brands <- vipsam2 %>%
-#   select(brand_name, sub_brand_name, bottle_size, sku) %>%
-#   unique()
-
 # create dataframe of all brands
-df_brands <- vipsam2 %>%
-  select(brand_name) %>%
-  unique()
+df_brands_spirits <- vipsam2_spirits %>% select(brand_name) %>% unique()
+df_brands_rtd <- vipsam2_rtd %>% select(brand_name) %>% unique()
+df_brands_wine <- vipsam2_wine %>% select(brand_name) %>% unique()
 
 # create dataframe of tdlinx
-df_tdlinx <- TDlinx_master %>% 
-  select(tdlinx_number) %>% 
-  unique()
+df_tdlinx_spirits <- TDlinx_master_spirits %>% select(tdlinx_number) %>% unique()
+df_tdlinx_rtd <- TDlinx_master_rtd %>% select(tdlinx_number) %>% unique()
+df_tdlinx_wine <- TDlinx_master_wine %>% select(tdlinx_number) %>% unique()
 
-# spread tdlinx numbers into columns, df of 1 row and many cols.
-df_tdlinx_wide <- df_tdlinx %>% 
-  mutate(tdlinx_number = paste0("v_", tdlinx_number), 
-         Value = 1) %>% 
+# spread tdlinx numbers into columns, df of 1 row and many cols
+df_tdlinx_wide_spirits <- df_tdlinx_spirits %>% mutate(tdlinx_number = paste0("v_", tdlinx_number), Value = 1) %>% 
+  spread(key = tdlinx_number, value = Value, fill = 0)
+df_tdlinx_wide_rtd <- df_tdlinx_rtd %>% mutate(tdlinx_number = paste0("v_", tdlinx_number), Value = 1) %>% 
+  spread(key = tdlinx_number, value = Value, fill = 0)
+df_tdlinx_wide_wine <- df_tdlinx_wine %>% mutate(tdlinx_number = paste0("v_", tdlinx_number), Value = 1) %>% 
   spread(key = tdlinx_number, value = Value, fill = 0)
 
 # bind the brands and tdlinx dfs
-df_bind <- bind_rows(df_brands, df_tdlinx_wide) 
-
-# gather all tdlinx numbers into 1 column, so now there is a tdlinx_number associated with every brand
-# after POC is agreed upon every tdlinx_number will be associated with every (brand, sub_brand, bottle_size, and sku combination.)
-df_gather <- df_bind %>% 
-  pivot_longer(cols = starts_with("v_"), 
-               names_to = "tdlinx_number",
-               values_to = "Value")
+df_bind_spirits <- bind_rows(df_brands_spirits, df_tdlinx_wide_spirits)
+df_bind_rtd <- bind_rows(df_brands_rtd, df_tdlinx_wide_spirits)
+df_bind_wine <- bind_rows(df_brands_wine, df_tdlinx_wide_wine)
 
 # remove constant prefix from tdlinx_number and drop Value column
-df_gather <- df_gather %>% 
-  mutate(tdlinx_number = gsub("v_", "", tdlinx_number)) %>% 
-  select(-Value)
+df_gather_spirits <- df_bind_spirits %>% pivot_longer(cols = starts_with("v_"), names_to = "tdlinx_number", values_to = "Value")
+df_gather_rtd <- df_bind_rtd %>% pivot_longer(cols = starts_with("v_"), names_to = "tdlinx_number", values_to = "Value")
+df_gather_wine <- df_bind_wine %>% pivot_longer(cols = starts_with("v_"), names_to = "tdlinx_number", values_to = "Value")
 
-# remove unnecessary dataframes
-rm(df_bind, df_brands, df_tdlinx, df_tdlinx_wide)
+# remove unnecessary data frames
+rm(df_bind_spirits, df_bind_rtd, df_bind_wine,
+   df_brands_spirits, df_brands_rtd, df_brands_wine,
+   df_tdlinx_spirits, df_tdlinx_rtd, df_tdlinx_wine,
+   df_tdlinx_wide_spirits, df_tdlinx_wide_rtd, df_tdlinx_wide_wine)
 
 ```
 
 ### Join df_gather & vipsam2
 ```{r}
 
-# Join df_gather& vipsam2, and replace NAs with zero for 12-month rolling volume
-df <- full_join(x = df_gather, y = vipsam2) %>% 
+# Join df_gather & vipsam2, and replace NAs with zero for 12-month rolling volume
+df_spirits <- full_join(x = df_gather_spirits, y = vipsam2_spirits) %>% 
   mutate(v12_month_cases_9l = replace_na(v12_month_cases_9l, replace = 0))
 
-# Join df & TDlinx_master dataframes, so that we have all of the store details and location information.
-df <- full_join(x = df, y = TDlinx_master)
+# Join df & TDlinx_master data frames, so that we have all of the store details and location information.
+df_spirits <- full_join(x = df_spirits, y = TDlinx_master_spirits)
+
+# same for RTDs
+df_rtd <- full_join(x = df_gather_rtd, y = vipsam2_rtd) %>% 
+  mutate(v12_month_cases_9l = replace_na(v12_month_cases_9l, replace = 0))
+df_rtd <- full_join(x = df_rtd, y = TDlinx_master_rtd)
+
+# and wines
+df_wine <- full_join(x = df_gather_wine, y = vipsam2_wine) %>% 
+  mutate(v12_month_cases_9l = replace_na(v12_month_cases_9l, replace = 0))
+df_wine <- full_join(x = df_wine, y = TDlinx_master_wine)
 
 # remove unnecessary dataframes
-rm(df_gather, TDlinx_master, vipsam2)
+rm(df_gather_spirits, TDlinx_master_spirits, vipsam2_spirits,
+   df_gather_rtd, TDlinx_master_rtd, vipsam2_rtd, 
+   df_gather_wine, TDlinx_master_wine, vipsam2_wine)
 
 ```
+
+```{r}
+df_spirits <- df_spirits %>% 
+  mutate(store_address = paste0(store_street_address, ", ", store_city, ", ", store_state, " ", store_zip))
+df_rtd <- df_rtd %>% 
+  mutate(store_address = paste0(store_street_address, ", ", store_city, ", ", store_state, " ", store_zip))
+df_wine <- df_wine %>% 
+  mutate(store_address = paste0(store_street_address, ", ", store_city, ", ", store_state, " ", store_zip))
+```
+
 
 ### Write CSV file of All Brand-Store combinations
 ```{r}
 
-write_csv(x = df, path = "vipsam_brand_stores.csv")
+write_csv(x = df_spirits, path = "/data1/home/bi6ekbg/vipsam2/vipsam_spirits_brand_stores.csv")
+write_csv(x = df_rtd, path = "/data1/home/bi6ekbg/vipsam2/vipsam_rtd_brand_stores.csv")
+write_csv(x = df_wine, path = "/data1/home/bi6ekbg/vipsam2/vipsam_wine_brand_stores.csv")
 
 ```
-
-### Create Field `store_address` that will be the complete address, this will be the input for the geocoding script. Write CSV file.
-```{r, eval=FALSE}
-
-df <- df %>% 
-  mutate(store_address = paste0(store_street_address, ", ", store_city, ", ", store_state, " ", store_zip))
-
-write_csv(x = df, path = "vipsam_brand_stores_geocode.csv")
-```
-
