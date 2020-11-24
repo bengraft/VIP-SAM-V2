@@ -163,6 +163,8 @@ df_brands <- vipsam2 %>%
 df_brands_spirits <- df_brands %>% filter(product_type == "Spirit")
 df_brands_rtd <- df_brands %>% filter(product_type == "RTD")
 df_brands_wine <- df_brands %>% filter(product_type == "Wine")
+
+rm(df_brands)
 ```
 
 ### Split TDlinx data by "sells_`product_type`" fields
@@ -192,6 +194,8 @@ df_tdlinx_wide_wine <- df_tdlinx %>%
   filter(sells_wine == "Yes") %>% 
   spread(key = tdlinx_number, value = Value, fill = 0) %>% 
   select(-c(sells_distilled_spirits, sells_beer, sells_wine))
+
+rm(df_tdlinx)
 ```
 
 
@@ -204,7 +208,9 @@ df_bind_wine <- bind_rows(df_brands_wine, df_tdlinx_wide_wine)
 
 df_list <- list(df_bind_spirits, df_bind_rtd, df_bind_wine)
 
-rm(df_brands_spirits, df_tdlinx_wide_spirits, df_brands_rtd, df_tdlinx_wide_rtd, df_brands_wine, df_tdlinx_wide_wine)
+rm(df_brands_spirits, df_tdlinx_wide_spirits, df_brands_rtd, df_tdlinx_wide_rtd, 
+   df_brands_wine, df_tdlinx_wide_wine, df_bind_spirits, df_bind_rtd, 
+   df_bind_wine)
 ```
 
 
@@ -221,8 +227,7 @@ df_gather_list <- lapply(df_list, function(x)  {
     select(-Value)
 })
 
-rm(df_bind_spirits, df_bind_rtd, df_bind_wine)
-
+rm(df_list)
 ```
 
 ```{r}
@@ -244,7 +249,7 @@ df_rtd <- full_join(x = df_gather_list[[2]], y = vipsam2_rtd) %>%
 df_wine <- full_join(x = df_gather_list[[3]], y = vipsam2_wine) %>% 
   mutate(v12_month_cases_9l = replace_na(v12_month_cases_9l, replace = 0))
 
-
+rm(df_gather_list, vipsam2_spirits, vipsam2_rtd, vipsam2_wine, vipsam2)
 ```
 
 ### Filter TDLinx by "sells_`product_type`" & Join with df_`product_type`
@@ -258,7 +263,7 @@ df_spirits <- full_join(df_spirits, TDlinx_master_spirits)
 df_rtd <- full_join(df_rtd, TDlinx_master_rtd)
 df_wine <- full_join(df_wine, TDlinx_master_wine)
 
-rm(TDlinx_master_spirits, TDlinx_master_rtd, TDlinx_master_wine, vipsam2_spirits, vipsam2_rtd, vipsam2_wine)
+rm(TDlinx_master_spirits, TDlinx_master_rtd, TDlinx_master_wine, TDlinx_master)
 ```
 
 ### Create field for full address 
@@ -286,4 +291,5 @@ df <- bind_rows(df_spirits, df_rtd, df_wine)
 
 write_csv(x = df, path = "/data1/home/bi6ekbg/vipsam2/RTC_account_opportunities.csv")
 
+rm(df_spirits, df_rtd, df_wine)
 ```
