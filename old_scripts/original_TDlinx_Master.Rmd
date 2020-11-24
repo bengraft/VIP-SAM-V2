@@ -1,0 +1,150 @@
+---
+title: "Original - Create a List of Opportunity Accounts by Joining TDLinx Master Data & VIPSAM2"
+author: "Ben Graft"
+date: "11/9/2020"
+output: html_document
+---
+
+### Load Libraries
+```{r}
+library(tidyverse)
+library(purrr)
+library(odbc)
+library(RODBC)
+library(dplyr)
+library(ggplot2)
+library(gtable)
+library(stringi)
+library(DBI)
+library(naniar)
+library(stringr)
+library(lubridate)
+library(maps)
+library(readr)
+
+con <- dbConnect(odbc::odbc(), dsn = "CLPImpala")
+
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, tidy = TRUE)
+
+```
+
+### Pull All Open Stores from TDLinx Master Data Source
+```{sql connection=con, output.var="TDlinx_master"}
+
+SELECT DISTINCT stdlinxscd as 'tdlinx_number', store_status, store_name, store_street_address, store_city, store_state, store_zip, store_latitude, store_longitude, premise_type, sells_distilled_spirits, sells_wine, sells_beer FROM dp_data_science.vwb_stb_tdlinx
+WHERE store_status = "Open Store"
+
+
+```
+
+Trim the field `store_zip` to just the first 5 digits
+```{r}
+
+TDlinx_master <- TDlinx_master %>% 
+  mutate(store_zip = trimws(
+    stringr::str_sub(
+      string = store_zip, start = 1, end = 5)
+    ))
+
+```
+
+<!-- ### check if TDLinx Master has any duplicates -->
+```{r, eval=FALSE, echo = FALSE}
+df_tdlinx_master_check <- TDlinx_master %>% 
+  group_by(tdlinx_number) %>% 
+  mutate(row_id = row_number(),
+         max_row_id = max(row_id)) %>% 
+  filter(max_row_id > 1)
+
+```
+
+### Pull All SKUs level information for all brands and associated 12-month Rolling Volume
+```{sql connection=con, output.var="vipsam2"}
+
+SELECT tdlinx_number, brand_name, SUM(v12_month_cases_9l) as 'v12_month_cases_9l', sells_distilled_spirits, sells_wine, sells_beer
+FROM aa_data_science_staging.aa_eh_tbl_vipsamii 
+WHERE t_date = (SELECT MAX(t_date) FROM aa_data_science_staging.aa_eh_tbl_vipsamii) and 
+store_status = "Open Store"
+GROUP BY tdlinx_number, brand_name, sells_distilled_spirits, sells_wine, sells_beer
+
+```
+
+### Once POC is agreed upon, then the vipsam2 data will be pulled at the Brand, Sub_Brand, Bottle_Size, and SKU level
+```{sql connection=con, output.var="vipsam2", eval=FALSE, echo = FALSE}
+
+SELECT tdlinx_number, brand_name, sub_brand_name, bottle_size, sku, MAX(t_date) as 'date', SUM(v12_month_cases_9l) as 'v12_month_cases_9l'
+FROM aa_data_science_staging.aa_eh_tbl_vipsamii 
+WHERE t_date = (SELECT MAX(t_date) FROM aa_data_science_staging.aa_eh_tbl_vipsamii) 
+GROUP BY tdlinx_number, brand_name, t_date, sub_brand_name, bottle_size, sku
+
+```
+
+
+### Create Dataframe that has a tdlinx_number associated with every brand
+<!-- , sub_brand, bottle_size, sku combination. -->
+* (For the POC only use Brand. The final product will include brand, sub_brand, bottle_size, and sku)
+```{r}
+
+# create dataframe of all brand, sub_brand, bottle_size, sku
+# df_brands <- vipsam2 %>%
+#   select(brand_name, sub_brand_name, bottle_size, sku) %>%
+#   unique()
+
+# create dataframe of all brands
+df_brands <- vipsam2 %>%
+  select(brand_name) %>%
+  unique()
+
+# create dataframe of tdlinx
+df_tdlinx <- TDlinx_master %>% 
+  select(tdlinx_number) %>% 
+  unique()
+
+# spread tdlinx numbers into columns, df of 1 row and many cols.
+df_tdlinx_wide <- df_tdlinx %>% 
+  mutate(tdlinx_number = paste0("v_", tdlinx_number), 
+         Value = 1) %>% 
+  spread(key = tdlinx_number, value = Value, fill = 0)
+
+# bind the brands and tdlinx dfs
+df_bind <- bind_rows(df_brands, df_tdlinx_wide) 
+
+# gather all tdlinx numbers into 1 column, so now there is a tdlinx_number associated with every brand
+# after POC is agreed upon every tdlinx_number will be associated with every (brand, sub_brand, bottle_size, and sku combination.)
+df_gather <- df_bind %>% 
+  pivot_longer(cols = starts_with("v_"), 
+               names_to = "tdlinx_number",
+               values_to = "Value")
+
+# remove constant prefix from tdlinx_number and drop Value column
+df_gather <- df_gather %>% 
+  mutate(tdlinx_number = gsub("v_", "", tdlinx_number)) %>% 
+  select(-Value)
+
+# remove unnecessary dataframes
+rm(df_bind, df_brands, df_tdlinx, df_tdlinx_wide)
+
+```
+
+### Join df_gather & vipsam2
+```{r}
+
+# Join df_gather& vipsam2, and replace NAs with zero for 12-month rolling volume
+df <- full_join(x = df_gather, y = vipsam2) %>% 
+  mutate(v12_month_cases_9l = replace_na(v12_month_cases_9l, replace = 0)) %>% 
+  mutate(store_address = paste0(store_street_address, ", ", store_city, ", ", store_state, " ", store_zip))
+
+# Join df & TDlinx_master dataframes, so that we have all of the store details and location information.
+df <- full_join(x = df, y = TDlinx_master)
+
+# remove unnecessary dataframes
+rm(df_gather, TDlinx_master, vipsam2)
+
+```
+
+### Write CSV file of All Brand-Store combinations
+```{r}
+
+write_csv(x = df, path = "/data1/home/bi6ekbg/vipsam2/vipsam_brand_stores.csv")
+
+```
